@@ -8,7 +8,7 @@ works standalone; framework wiring is just string plumbing.
 ```ei
 import { I18n } from "i18n.i18n"
 
-I18n.loadDir("locales")
+I18n.load() // "locales" by default; I18n.load("path/to/dir") to override
 
 I18n.t("auth.login.title", "pt-BR")      // "Entrar"
 I18n.tp("hello", "es", ["name" of "Leo"]) // "Hola, Leo"

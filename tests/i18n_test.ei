@@ -10,6 +10,10 @@ test "i18n: fixtures load from disk" {
     assert(n == 4)
 }
 
+test "i18n: load defaults to the conventional path" {
+    assert(I18n.load("tests/fixtures/locales") == 4)
+}
+
 test "i18n: normalize handles separators and case" {
     assert(I18n.normalizeLocale("pt_BR") == "pt-BR")
     assert(I18n.normalizeLocale("PT-br") == "pt-BR")

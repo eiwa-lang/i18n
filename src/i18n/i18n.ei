@@ -76,7 +76,9 @@ object I18n {
 
     // Loads every *.yaml/*.yml in dir; the file name (sans extension)
     // is the locale tag. Returns the number of tables loaded.
-    fun loadDir(dir: String): Int {
+    // Defaults to "locales" (industry standard: conventional path
+    // with override), mirroring Rails `load_path` / i18next `loadPath`.
+    fun load(dir: String = "locales"): Int {
         val files = Dir.names(dir)
         var loaded = 0
         var i = 0
@@ -98,6 +100,11 @@ object I18n {
             i = i + 1
         }
         return loaded
+    }
+
+    // Explicit-path alias for load().
+    fun loadDir(dir: String): Int {
+        return I18n.load(dir)
     }
 
     // Walks a dotted key through nested maps. Non-string leaves
