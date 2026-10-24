@@ -1,0 +1,7 @@
+# Portuguese (base) — shared by pt-BR and pt-PT.
+auth:
+  login:
+    title: "Entrar"
+items:
+  one: "{count} convite"
+  other: "{count} convites"

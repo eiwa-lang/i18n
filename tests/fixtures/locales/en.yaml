@@ -1,0 +1,11 @@
+# English — ultimate fallback. Every key should exist here.
+auth:
+  login:
+    title: "Sign in"
+    subtitle: "Welcome back"
+invite:
+  strip:
+    hint: "Share your link — whoever joins with it follows you automatically."
+items:
+  one: "{count} invite"
+  other: "{count} invites"

@@ -1,0 +1,247 @@
+import { List, MutableList, Map, MutableMap } from "std.collections"
+import { Regex } from "std.regex"
+import { parseYaml, YamlValue } from "std.yaml"
+import { Dir } from "std.fs"
+import { File } from "std.fs"
+
+// Minimal YAML-backed i18n for Eiwa services.
+//
+// Dictionaries are nested YAML maps (`locales/pt-BR.yaml`, `pt.yaml`,
+// `en.yaml`, `es.yaml`). Keys are dotted paths (`auth.login.title`),
+// values are strings with `{param}` interpolation. Plurals are
+// `one:`/`other:` sub-maps (shared rule for PT/EN/ES: `one` iff
+// count == 1, else `other`).
+//
+// Lookup fallback is regional-first: `pt-PT` -> `pt` -> `en`
+// (default fallback, configurable via `I18n.fallback`). A missing key
+// returns the key itself and never breaks rendering.
+object I18n {
+    var fallback = "en"
+    var tables = MutableMap<String, YamlValue>()
+
+    // "pt_BR" -> "pt-BR", "PT-br" -> "pt-BR", "en" -> "en".
+    // Returns "" for garbage (callers treat it as absent).
+    fun normalizeLocale(raw: String): String {
+        val cleaned = raw.trim().replace("_", "-")
+        if (cleaned == "") {
+            return ""
+        }
+        val parts = cleaned.split("-")
+        if (parts.size() == 0) {
+            return ""
+        }
+        val lang = parts.get(0).lowercase()
+        if (!Regex("^[a-z]{2,3}\$").matches(lang)) {
+            return ""
+        }
+        if (parts.size() == 1) {
+            return lang
+        }
+        val region = parts.get(1).uppercase()
+        if (!Regex("^[A-Z]{2}\$").matches(region)) {
+            return lang
+        }
+        return "$lang-$region"
+    }
+
+    // "pt-BR" -> ["pt-BR", "pt"]; "es" -> ["es"]; garbage -> [].
+    fun localeChain(locale: String): List<String> {
+        val tag = I18n.normalizeLocale(locale)
+        if (tag == "") {
+            return List<String>()
+        }
+        val parts = tag.split("-")
+        if (parts.size() == 1) {
+            return [tag]
+        }
+        return [tag, parts.get(0)]
+    }
+
+    fun baseOf(tag: String): List<String> {
+        val parts = tag.split("-")
+        if (parts.size() > 1) {
+            return [parts.get(0)]
+        }
+        return List<String>()
+    }
+
+    fun loadSource(locale: String, source: String): Bool {
+        val tag = I18n.normalizeLocale(locale)
+        if (tag == "") {
+            return false
+        }
+        I18n.tables[tag] = parseYaml(source)
+        return true
+    }
+
+    // Loads every *.yaml/*.yml in dir; the file name (sans extension)
+    // is the locale tag. Returns the number of tables loaded.
+    fun loadDir(dir: String): Int {
+        val files = Dir.names(dir)
+        var loaded = 0
+        var i = 0
+        while (i < files.size()) {
+            val f = files.get(i)
+            var locale = ""
+            if (f.endsWith(".yaml")) {
+                locale = f.substring(0, f.length - 5)
+            } else {
+                if (f.endsWith(".yml")) {
+                    locale = f.substring(0, f.length - 4)
+                }
+            }
+            if (locale != "") {
+                if (I18n.loadSource(locale, File.read("$dir/$f"))) {
+                    loaded = loaded + 1
+                }
+            }
+            i = i + 1
+        }
+        return loaded
+    }
+
+    // Walks a dotted key through nested maps. Non-string leaves
+    // (sub-maps) and missing segments return null.
+    fun lookup(root: YamlValue, key: String): String? {
+        var node: YamlValue = root
+        val parts = key.split(".")
+        var i = 0
+        while (i < parts.size()) {
+            if (!node.isMap()) {
+                return null
+            }
+            val next = node.get(parts.get(i))
+            if (next == null) {
+                return null
+            }
+            node = next
+            i = i + 1
+        }
+        if (!node.isString()) {
+            return null
+        }
+        return node.asString()
+    }
+
+    // Core lookup with regional -> base -> fallback chain.
+    // Never throws: worst case returns the key itself.
+    fun t(key: String, locale: String): String {
+        val chain = I18n.localeChain(locale)
+        var i = 0
+        while (i < chain.size()) {
+            val root = I18n.tables.get(chain.get(i))
+            if (root != null) {
+                val hit = I18n.lookup(root, key)
+                if (hit != null) {
+                    return hit
+                }
+            }
+            i = i + 1
+        }
+        val fb = I18n.tables.get(I18n.fallback)
+        if (fb != null) {
+            val hit = I18n.lookup(fb, key)
+            if (hit != null) {
+                return hit
+            }
+        }
+        return key
+    }
+
+    // t() plus `{param}` interpolation from a string map.
+    fun tp(key: String, locale: String, params: Map<String, String>): String {
+        var out = I18n.t(key, locale)
+        val entries = params.entries
+        var i = 0
+        while (i < entries.size()) {
+            var curr = entries.get(i)
+            while (curr != null) {
+                val token = "{" + curr!!.key + "}"
+                out = out.replace(token, curr!!.value)
+                curr = curr!!.next
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    // Plural selection (`one` iff count == 1, else `other`) with
+    // automatic `{count}` interpolation. Falls back to the bare key
+    // when no plural table exists.
+    fun plural(key: String, locale: String, count: Int): String {
+        val form = if (count == 1) "one" else "other"
+        var template = I18n.t("$key.$form", locale)
+        if (template == "$key.$form") {
+            template = I18n.t(key, locale)
+        }
+        return template.replace("{count}", "$count")
+    }
+
+    // "pt-BR,pt;q=0.9,en;q=0.8" -> ["pt-BR", "pt", "en"] (header order;
+    // q-values only order what the client already ordered).
+    fun parseAcceptLanguage(header: String): List<String> {
+        val out = MutableList<String>()
+        val parts = header.split(",")
+        var i = 0
+        while (i < parts.size()) {
+            val lang = parts.get(i).split(";").get(0).trim()
+            if (lang != "") {
+                out.add(lang)
+            }
+            i = i + 1
+        }
+        return out.freeze()
+    }
+
+    // First candidate (already normalized) present in supported wins;
+    // each candidate also tries its base language. Returns null when
+    // nothing matches so the caller falls through to the next source.
+    fun pick(candidates: List<String>, supported: List<String>): String? {
+        var i = 0
+        while (i < candidates.size()) {
+            val tag = I18n.normalizeLocale(candidates.get(i))
+            if (tag != "") {
+                val exact = I18n.matchTag(tag, supported)
+                if (exact != null) {
+                    return exact
+                }
+                val bases = I18n.baseOf(tag)
+                var b = 0
+                while (b < bases.size()) {
+                    val hit = I18n.matchTag(bases.get(b), supported)
+                    if (hit != null) {
+                        return hit
+                    }
+                    b = b + 1
+                }
+            }
+            i = i + 1
+        }
+        return null
+    }
+
+    fun matchTag(tag: String, supported: List<String>): String? {
+        var j = 0
+        while (j < supported.size()) {
+            if (I18n.normalizeLocale(supported.get(j)) == tag) {
+                return tag
+            }
+            j = j + 1
+        }
+        return null
+    }
+
+    // Full resolution: ?lang= > account > cookie > Accept-Language >
+    // fallback. Every source is optional ("") and simply skipped.
+    fun resolveLocale(query: String, account: String, cookie: String, acceptLanguage: String, supported: List<String>, fallback: String): String {
+        val direct = I18n.pick([query, account, cookie], supported)
+        if (direct != null) {
+            return direct
+        }
+        val viaHeader = I18n.pick(I18n.parseAcceptLanguage(acceptLanguage), supported)
+        if (viaHeader != null) {
+            return viaHeader
+        }
+        return fallback
+    }
+}

@@ -1,0 +1,5 @@
+# Brazilian Portuguese — regional overrides only.
+auth:
+  login:
+    title: "Entrar"
+    subtitle: "Bem-vindo de volta"

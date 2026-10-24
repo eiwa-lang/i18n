@@ -1,0 +1,7 @@
+# Spanish.
+auth:
+  login:
+    title: "Iniciar sesión"
+items:
+  one: "{count} invitación"
+  other: "{count} invitaciones"

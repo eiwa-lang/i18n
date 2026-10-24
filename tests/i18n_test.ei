@@ -1,0 +1,76 @@
+import { assert } from "std.core"
+import { I18n } from ".i18n.i18n"
+
+fun supported(): List<String> {
+    return ["pt-BR", "pt", "en", "es"]
+}
+
+test "i18n: fixtures load from disk" {
+    val n = I18n.loadDir("tests/fixtures/locales")
+    assert(n == 4)
+}
+
+test "i18n: normalize handles separators and case" {
+    assert(I18n.normalizeLocale("pt_BR") == "pt-BR")
+    assert(I18n.normalizeLocale("PT-br") == "pt-BR")
+    assert(I18n.normalizeLocale("en") == "en")
+    assert(I18n.normalizeLocale("") == "")
+    assert(I18n.normalizeLocale("!!!") == "")
+}
+
+test "i18n: chain is regional then base" {
+    val chain = I18n.localeChain("pt-PT")
+    assert(chain.size() == 2)
+    assert(chain.get(0) == "pt-PT")
+    assert(chain.get(1) == "pt")
+    val single = I18n.localeChain("es")
+    assert(single.size() == 1)
+    assert(single.get(0) == "es")
+}
+
+test "i18n: regional override wins over base" {
+    assert(I18n.t("auth.login.subtitle", "pt-BR") == "Bem-vindo de volta")
+}
+
+test "i18n: missing regional falls back to base then english" {
+    assert(I18n.t("auth.login.title", "pt-PT") == "Entrar")
+    assert(I18n.t("auth.login.subtitle", "pt-PT") == "Welcome back")
+    assert(I18n.t("invite.strip.hint", "es") == "Share your link — whoever joins with it follows you automatically.")
+}
+
+test "i18n: missing key returns the key" {
+    assert(I18n.t("no.such.key", "pt-BR") == "no.such.key")
+    assert(I18n.t("items", "pt-BR") == "items")
+}
+
+test "i18n: interpolation replaces params" {
+    assert(I18n.tp("items.one", "pt-BR", ["count" of "5"]) == "5 convite")
+}
+
+test "i18n: plurals use one for 1, other otherwise" {
+    assert(I18n.plural("items", "pt-BR", 1) == "1 convite")
+    assert(I18n.plural("items", "pt-BR", 0) == "0 convites")
+    assert(I18n.plural("items", "pt-BR", 5) == "5 convites")
+    assert(I18n.plural("items", "es", 2) == "2 invitaciones")
+}
+
+test "i18n: resolve prioritizes query, account, cookie, header, default" {
+    assert(I18n.resolveLocale("es", "pt-BR", "", "", supported(), "en") == "es")
+    assert(I18n.resolveLocale("", "pt-BR", "es", "", supported(), "en") == "pt-BR")
+    assert(I18n.resolveLocale("", "", "es", "", supported(), "en") == "es")
+    assert(I18n.resolveLocale("", "", "", "es,en;q=0.8", supported(), "en") == "es")
+    assert(I18n.resolveLocale("", "", "", "", supported(), "en") == "en")
+}
+
+test "i18n: resolve matches base language when region is unsupported" {
+    assert(I18n.resolveLocale("", "pt-PT", "", "", supported(), "en") == "pt")
+    assert(I18n.resolveLocale("", "", "", "pt-PT,pt;q=0.9", supported(), "en") == "pt")
+}
+
+test "i18n: accept-language parsing keeps header order" {
+    val langs = I18n.parseAcceptLanguage("pt-BR,pt;q=0.9,en;q=0.8")
+    assert(langs.size() == 3)
+    assert(langs.get(0) == "pt-BR")
+    assert(langs.get(1) == "pt")
+    assert(langs.get(2) == "en")
+}
